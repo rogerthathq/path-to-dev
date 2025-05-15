@@ -1,0 +1,31 @@
+# Real-Time Audio Translator
+
+My wife does not know english, this app listens to your microphone or system audio, translates spoken English to Spanish (or another language), and plays back the translation as audio — plus shows subtitles.
+
+## Installation
+
+Download the `Danilator.exe` from the releases folder.  
+Ensure your Windows sound settings have “Stereo Mix” enabled if you want to capture system audio like Zoom or Discord.
+
+## Usage
+
+1. Launch the app.  
+2. Select your audio input device from the dropdown (microphone or Stereo Mix).  
+3. Press Play to start live translation.  
+4. Use Pause to temporarily stop listening.  
+5. Subtitles of original and translated speech show below the buttons.
+
+## Troubleshooting
+
+- If you get permission errors on audio files, run the app in a folder where you have full read/write access.  
+- No audio devices listed? Make sure your mic is plugged in and Stereo Mix is enabled.
+
+## Building from source
+
+Requires Python 3.13+ and these packages: `speech_recognition`, `deep_translator`, `gtts`, `pygame`, `pyaudio`, `Pillow`.
+
+Run:
+
+```bash
+pip install -r requirements.txt
+python Danilator.py
