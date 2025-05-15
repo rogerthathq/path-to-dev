@@ -1,31 +1,188 @@
-# Real-Time Audio Translator
+import speech_recognition as sr
+from deep_translator import GoogleTranslator
+from gtts import gTTS
+import os
+import pygame
+import tkinter as tk
+from tkinter import ttk
+from PIL import Image, ImageTk
+from threading import Thread, Event
+import uuid
+import pyaudio
+import time
+from tkinter import scrolledtext
 
-My wife does not know english, this app listens to your microphone or system audio, translates spoken English to Spanish (or another language), and plays back the translation as audio — plus shows subtitles.
+# Config
+TARGET_LANGUAGE = 'es'  # Change to your desired language
 
-## Installation
+# Init
+recognizer = sr.Recognizer()
+pygame.mixer.init()
+pause_event = Event()
+stop_event = Event()
 
-Download the `Danilator.exe` from the releases folder.  
-Ensure your Windows sound settings have “Stereo Mix” enabled if you want to capture system audio like Zoom or Discord.
+# Globals for GUI
+original_text_var = None
+translated_text_var = None
+selected_device_index = None
+log_box = None
 
-## Usage
+def list_microphones():
+    audio = pyaudio.PyAudio()
+    return [audio.get_device_info_by_index(i)["name"] for i in range(audio.get_device_count()) if audio.get_device_info_by_index(i)["maxInputChannels"] > 0]
 
-1. Launch the app.  
-2. Select your audio input device from the dropdown (microphone or Stereo Mix).  
-3. Press Play to start live translation.  
-4. Use Pause to temporarily stop listening.  
-5. Subtitles of original and translated speech show below the buttons.
+def play_audio(filename):
+    pygame.mixer.music.load(filename)
+    pygame.mixer.music.play()
+    while pygame.mixer.music.get_busy():
+        continue
 
-## Troubleshooting
+def translate_and_speak():
+    global selected_device_index
+    mic = sr.Microphone(device_index=selected_device_index)
 
-- If you get permission errors on audio files, run the app in a folder where you have full read/write access.  
-- No audio devices listed? Make sure your mic is plugged in and Stereo Mix is enabled.
+    with mic as source:
+        while not stop_event.is_set():
+            if pause_event.is_set():
+                continue
+            try:
+                print("🎙️ Listening...")
+                audio = recognizer.listen(source)
 
-## Building from source
+                text = recognizer.recognize_google(audio)
+                print("📝 You said:", text)
+                if original_text_var:
+                    original_text_var.set(f"You: {text}")
 
-Requires Python 3.13+ and these packages: `speech_recognition`, `deep_translator`, `gtts`, `pygame`, `pyaudio`, `Pillow`.
+                translated_text = GoogleTranslator(source='auto', target=TARGET_LANGUAGE).translate(text)
+                print("🌍 Translated:", translated_text)
+                if translated_text_var:
+                    translated_text_var.set(f"Translation: {translated_text}")
+                    log_translation(translated_text)
 
-Run:
 
-```bash
-pip install -r requirements.txt
-python Danilator.py
+                filename = f"{uuid.uuid4().hex}.mp3"
+                tts = gTTS(translated_text, lang=TARGET_LANGUAGE)
+                tts.save(filename)
+                play_audio(filename)
+                os.remove(filename)
+
+            except sr.UnknownValueError:
+                print("❌ Could not understand audio.")
+                if original_text_var:
+                    original_text_var.set("You: [Unclear]")
+                    translated_text_var.set("Translation: [Unclear]")
+            except sr.RequestError as e:
+                print("⚠️ API error:", e)
+                if translated_text_var:
+                    translated_text_var.set(f"Translation: [API error: {e}]")
+            except Exception as e:
+                print("Unexpected error:", e)
+                if translated_text_var:
+                    translated_text_var.set(f"Translation: [Error: {e}]")
+
+def start_gui():
+    global original_text_var, translated_text_var, selected_device_index
+
+    root = tk.Tk()
+    root.title("Live Translator")
+    root.configure(bg="#121212")
+    root.geometry("900x600")
+    root.minsize(600, 400)
+
+    font_title = ("Helvetica", 20, "bold")
+    font_text = ("Helvetica", 14)
+
+    root.grid_rowconfigure(3, weight=1)
+    root.grid_columnconfigure(0, weight=1)
+
+    # Title
+    title = tk.Label(root, text="🌐 Real-Time Audio Translator", font=font_title, fg="#E97331", bg="#121212")
+    title.grid(row=0, column=0, pady=(10, 0), sticky="n")
+
+    # Audio input selection
+    select_frame = tk.Frame(root, bg="#121212")
+    select_frame.grid(row=1, column=0, pady=(10, 5), sticky="ew")
+    select_frame.columnconfigure(1, weight=1)
+
+    tk.Label(select_frame, text="🎧 Choose input:", font=font_text, fg="white", bg="#121212").grid(row=0, column=0, padx=10, sticky="w")
+
+    device_list = list_microphones()
+    selected_device = tk.StringVar(value=device_list[0] if device_list else "")
+    dropdown = tk.OptionMenu(select_frame, selected_device, *device_list)
+    dropdown.config(font=font_text, bg="#2e2e2e", fg="white", highlightbackground="#5D5FAA", width=40)
+    dropdown["menu"].config(bg="#2e2e2e", fg="white")
+    dropdown.grid(row=0, column=1, padx=10, sticky="ew")
+
+    # Button controls
+    button_frame = tk.Frame(root, bg="#121212")
+    button_frame.grid(row=2, column=0, pady=10)
+
+    def styled_button(text, command, color):
+        return tk.Button(
+            button_frame, text=text, command=command,
+            font=font_text, bg=color, fg="white", activebackground="#444", padx=20, pady=8, bd=0, relief="flat"
+        )
+
+    def on_play():
+        global selected_device_index
+        try:
+            selected_device_index = device_list.index(selected_device.get())
+            print(f"🎧 Using device: {selected_device.get()} (index {selected_device_index})")
+        except ValueError:
+            selected_device_index = None
+            print("⚠️ Device not found, using default mic")
+        pause_event.clear()
+        Thread(target=translate_and_speak, daemon=True).start()
+
+    def on_pause():
+        pause_event.set()
+        print("⏸️ Paused")
+
+    def on_close():
+        pause_event.set()
+        stop_event.set()
+        root.destroy()
+
+    styled_button("▶️ Play", on_play, "#5D5FAA").pack(side="left", padx=15)
+    styled_button("⏸️ Pause", on_pause, "#E97331").pack(side="left", padx=15)
+    styled_button("❌ Exit", on_close, "#aa3333").pack(side="left", padx=15)
+
+    # Subtitle display
+    subtitle_frame = tk.Frame(root, bg="#1e1e1e", bd=2, relief="groove")
+    subtitle_frame.grid(row=3, column=0, sticky="nsew", padx=20, pady=20)
+    subtitle_frame.grid_rowconfigure(0, weight=1)
+    subtitle_frame.grid_columnconfigure(0, weight=1)
+
+    original_text_var = tk.StringVar(value="You: [Waiting for input...]")
+    translated_text_var = tk.StringVar(value="Translation: [Waiting for speech...]")
+
+    original_label = tk.Label(subtitle_frame, textvariable=original_text_var,
+                              font=font_text, fg="#00FF99", bg="#1e1e1e",
+                              wraplength=800, justify="left")
+    translated_label = tk.Label(subtitle_frame, textvariable=translated_text_var,
+                                font=font_text, fg="#5D5FAA", bg="#1e1e1e",
+                                wraplength=800, justify="left")
+    # Scrollable translation log
+    global log_box
+    log_box = scrolledtext.ScrolledText(subtitle_frame, height=10, wrap="word", bg="#121212", fg="white", font=("Helvetica", 12))
+    log_box.grid(row=2, column=0, sticky="nsew", padx=15, pady=(0, 15))
+    log_box.config(state='disabled')
+
+    original_label.grid(row=0, column=0, sticky="nw", padx=15, pady=15)
+    translated_label.grid(row=1, column=0, sticky="nw", padx=15, pady=(0, 15))
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    root.mainloop()
+
+
+
+# Run GUI
+def log_translation(text):
+    if log_box:
+        log_box.config(state='normal')
+        log_box.insert(tk.END, text + '\n')
+        log_box.see(tk.END)
+        log_box.config(state='disabled')
+if __name__ == "__main__":
+    start_gui()
